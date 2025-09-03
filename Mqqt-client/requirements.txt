@@ -1,0 +1,5 @@
+paho-mqtt
+psycopg2-binarypip 
+
+
+    # install -r requirements.txt
