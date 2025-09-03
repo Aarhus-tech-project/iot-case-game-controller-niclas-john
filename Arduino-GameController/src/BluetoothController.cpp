@@ -36,7 +36,7 @@ void setup()
 {
     Serial.begin(115200);      // COM11
     SerialBT.begin("Nillers"); // COM12
-
+    hapDrive.begin();
     pinMode(PIN_X, INPUT_PULLUP);
     pinMode(PIN_O, INPUT_PULLUP);
     pinMode(PIN_Firkant, INPUT_PULLUP);
@@ -54,13 +54,13 @@ void setup()
     hapDrive.defaultMotor();
     hapDrive.enableFreqTrack(false);
     hapDrive.setOperationMode(DRO_MODE);
+    hapDrive.setVibrate(0);
     Serial.println("DA7280 ready.");
 }
 
 void loop()
 {
     // Read joysticks
-    setVibration(50);
     int lx = analogRead(JOY_X);
     int ly = analogRead(JOY_Y);
     int rx = analogRead(JOY_X2);
