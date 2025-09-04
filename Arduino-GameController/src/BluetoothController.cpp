@@ -26,17 +26,10 @@ void rotateJoystick(int rawX, int rawY, float angle, int &outX, int &outY)
     outY = constrain((int)yr + 2048, 0, 4095);
 }
 
-void setVibration(int intensity)
-{
-    intensity = constrain(intensity, 0, 127);
-    hapDrive.setVibrate(intensity);
-}
-
 void setup()
 {
     Serial.begin(115200);      // COM11
     SerialBT.begin("Nillers"); // COM12
-    hapDrive.begin();
     pinMode(PIN_X, INPUT_PULLUP);
     pinMode(PIN_O, INPUT_PULLUP);
     pinMode(PIN_Firkant, INPUT_PULLUP);
@@ -47,15 +40,14 @@ void setup()
     pinMode(PIN_DR, INPUT_PULLUP);
     pinMode(joyStickBtnLeft, INPUT_PULLUP);
     pinMode(joyStickBtnRight, INPUT_PULLUP);
-
-    Wire.begin(21, 22);
+    Wire.begin();
     if (!hapDrive.begin())
         Serial.println("Could not communicate with Haptic Driver.");
     hapDrive.defaultMotor();
     hapDrive.enableFreqTrack(false);
     hapDrive.setOperationMode(DRO_MODE);
-    hapDrive.setVibrate(0);
     Serial.println("DA7280 ready.");
+    hapDrive.setVibrate(0);
 }
 
 void loop()
@@ -81,17 +73,17 @@ void loop()
         String(rotRX) + "," + String(rotRY);
 
     SerialBT.println(data);
-
     // Read rumble commands from PC on COM
-    while (SerialBT.available())
+    if (SerialBT.available())
     {
-        String cmd = SerialBT.readStringUntil('\n'); // waits for \n
+        String cmd = SerialBT.readStringUntil('\n');
         cmd.trim();
+
         if (cmd.startsWith("Rumble,"))
         {
             int intensity = cmd.substring(7).toInt();
-            setVibration(intensity);
-            Serial.println("Rumble set to: " + String(intensity)); // debug
+            hapDrive.setVibrate(intensity);
+            Serial.println("Rumble set to: " + String(intensity));
         }
     }
 
