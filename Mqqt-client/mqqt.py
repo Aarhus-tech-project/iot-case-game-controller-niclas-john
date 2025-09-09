@@ -17,12 +17,27 @@ def init_db():
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS joystick_data (
+        CREATE TABLE IF NOT EXISTS controller_data (
             id BIGSERIAL PRIMARY KEY,
             topic TEXT,
-            x_axis NUMERIC(5,3),
-            y_axis NUMERIC(5,3),
-            button TEXT,
+            X TEXT,
+            O TEXT,
+            Firkant TEXT,
+            Trekant TEXT,
+            DU TEXT,
+            DD TEXT,
+            DL TEXT,
+            DR TEXT,
+            joyStickBtnLeft TEXT,
+            joyStickBtnRight TEXT,
+            rotRX TEXT,
+            rotRY TEXT,
+            gameBtn TEXT,
+            startBtn TEXT,
+            left_l1 TEXT,
+            left_l2 TEXT,
+            right_r1 TEXT,
+            right_r2 TEXT,
             timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -30,12 +45,19 @@ def init_db():
     cursor.close()
     conn.close()
 
-def insert_joystick_data(topic, x, y, button):
+def insert_controller_data(topic, payload):
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
+    fields = [
+        "X", "O", "Firkant", "Trekant", "DU", "DD", "DL", "DR",
+        "joyStickBtnLeft", "joyStickBtnRight",
+        "rotRX", "rotRY",
+        "gameBtn", "startBtn", "left_l1", "left_l2", "right_r1", "right_r2"
+    ]
+    values = [payload.get(f) for f in fields]
     cursor.execute(
-        "INSERT INTO joystick_data (topic, x_axis, y_axis, button) VALUES (%s, %s, %s, %s)",
-        (topic, x, y, button)
+        f"INSERT INTO controller_data (topic, {', '.join(fields)}) VALUES (%s, {', '.join(['%s']*len(fields))})",
+        [topic] + values
     )
     conn.commit()
     cursor.close()
@@ -44,9 +66,10 @@ def insert_joystick_data(topic, x, y, button):
 # -------------------
 # MQTT setup
 # -------------------
+
 BROKER = "192.168.113.12" 
 PORT = 1883
-TOPIC = "joystick/data" 
+TOPIC = "controller/data" 
 
 def on_connect(client, userdata, flags, rc):
     print(f"Connected with result code {rc}")
@@ -56,15 +79,8 @@ def on_message(client, userdata, msg):
     try:
         payload_str = msg.payload.decode("utf-8")
         payload = json.loads(payload_str)
-
-        # Extract joystick fields
-        x = payload.get("x")
-        y = payload.get("y")
-        button = payload.get("button")
-
-        insert_joystick_data(msg.topic, x, y, button)
-        print(f"Saved: {msg.topic} -> x={x}, y={y}, button={button}")
-
+        insert_controller_data(msg.topic, payload)
+        print(f"Saved: {msg.topic} -> {payload}")
     except Exception as e:
         print(f"Error: {e}")
 

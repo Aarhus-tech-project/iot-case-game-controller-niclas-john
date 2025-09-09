@@ -1,18 +1,22 @@
 #include "BluetoothSerial.h"
 #include <Wire.h>
-#include "Haptic_Driver.h"
-#include <math.h>
+#include "test_db.h"
 
-Haptic_Driver hapDrive;
 BluetoothSerial SerialBT;
 
-// Gamepad pins
+// Gamepad pins (ESP32 GPIOs)
 const int PIN_X = 15, PIN_O = 2, PIN_Firkant = 4, PIN_Trekant = 0;
 const int PIN_DU = 5, PIN_DD = 16, PIN_DL = 18, PIN_DR = 17;
-const int JOY_X = 36, JOY_Y = 39;
-const int JOY_X2 = 34, JOY_Y2 = 35;
 const int joyStickBtnLeft = 19;
 const int joyStickBtnRight = 23;
+
+// Joystick analog pins (ESP32 GPIOs)
+const int JOY_X = 36, JOY_Y = 39;
+const int JOY_X2 = 34, JOY_Y2 = 35;
+
+const int gameBtn = 27, startBtn = 14;
+const int left_l1 = 32, left_l2 = 33;
+const int right_r1 = 25, right_r2 = 26;
 
 int readButton(int pin) { return digitalRead(pin) == LOW ? 1 : 0; }
 
@@ -28,8 +32,11 @@ void rotateJoystick(int rawX, int rawY, float angle, int &outX, int &outY)
 
 void setup()
 {
-    Serial.begin(115200);      // COM11
-    SerialBT.begin("Nillers"); // COM12
+    Serial.begin(115200);
+
+        Wire.begin(21, 22);
+
+    // Configure ESP32 buttons
     pinMode(PIN_X, INPUT_PULLUP);
     pinMode(PIN_O, INPUT_PULLUP);
     pinMode(PIN_Firkant, INPUT_PULLUP);
@@ -40,18 +47,30 @@ void setup()
     pinMode(PIN_DR, INPUT_PULLUP);
     pinMode(joyStickBtnLeft, INPUT_PULLUP);
     pinMode(joyStickBtnRight, INPUT_PULLUP);
-    Wire.begin();
-    hapDrive.begin();
-    hapDrive.defaultMotor();
-    hapDrive.enableFreqTrack(false);
-    hapDrive.setOperationMode(DRO_MODE);
-    Serial.println("DA7280 ready.");
-    hapDrive.setVibrate(10);
+    pinMode(startBtn, INPUT_PULLUP);
+    pinMode(gameBtn, INPUT_PULLUP);
+    pinMode(left_l1, INPUT_PULLUP);
+    pinMode(left_l2, INPUT_PULLUP);
+    pinMode(right_r1, INPUT_PULLUP);
+    pinMode(right_r2, INPUT_PULLUP);
+
+    SerialBT.begin("Nillers"); // Bluetooth Serial
+
+    // Setup WiFi and MQTT (from test_db.h)
+    setup_wifi();
+    client.setServer(mqtt_server, mqtt_port);
 }
 
 void loop()
 {
-    // Read joysticks
+    // Ensure MQTT connection
+    if (!client.connected())
+    {
+        reconnect_mqtt();
+    }
+    client.loop();
+
+    // --- Read joysticks ---
     int lx = analogRead(JOY_X);
     int ly = analogRead(JOY_Y);
     int rx = analogRead(JOY_X2);
@@ -61,7 +80,7 @@ void loop()
     rotateJoystick(lx, ly, M_PI / 2, rotLX, rotLY);
     rotateJoystick(rx, ry, M_PI / 2, rotRX, rotRY);
 
-    // Send data over COM12 (Bluetooth Serial)
+    // --- Read ESP32 buttons ---
     String data =
         String(readButton(PIN_X)) + "," + String(readButton(PIN_O)) + "," +
         String(readButton(PIN_Firkant)) + "," + String(readButton(PIN_Trekant)) + "," +
@@ -69,22 +88,17 @@ void loop()
         String(readButton(PIN_DL)) + "," + String(readButton(PIN_DR)) + "," +
         String(readButton(joyStickBtnLeft)) + "," + String(readButton(joyStickBtnRight)) + "," +
         String(rotLX) + "," + String(rotLY) + "," +
-        String(rotRX) + "," + String(rotRY);
+        String(rotRX) + "," + String(rotRY) + "," +
+        String(readButton(gameBtn)) + "," + String(readButton(startBtn)) + "," +
+        String(readButton(left_l1)) + "," + String(readButton(left_l2)) + "," +
+        String(readButton(right_r1)) + "," + String(readButton(right_r2));
 
     SerialBT.println(data);
-    // Read rumble commands from PC on COM
-    if (SerialBT.available())
-    {
-        String cmd = SerialBT.readStringUntil('\n');
-        cmd.trim();
+    Serial.println(data);
 
-        if (cmd.startsWith("Rumble,"))
-        {
-            int intensity = cmd.substring(7).toInt();
-            hapDrive.setVibrate(intensity);
-            Serial.println("Rumble set to: " + String(intensity));
-        }
-    }
+    // Convert CSV to JSON and send to MQTT
+    String json = csvToJson(data);
+    client.publish("controller/data", json.c_str());
 
-    delay(15);
+    delay(20);
 }

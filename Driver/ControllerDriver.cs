@@ -12,7 +12,7 @@ class Program
     static ViGEmClient _client;
     static IDualShock4Controller _ds4; // Use DS4 controller instead of Xbox360
     static volatile bool _running = true;
-    static string ComPort = "";  // <-- change to your COM port
+    static string ComPort = "COM11";  // <-- change to your COM port
     const int Baud = 115200;
     static InputSimulator _inputSimulator = new InputSimulator();
     static bool prevBtnState = false; // Track previous button state
@@ -42,8 +42,8 @@ class Program
         Console.WriteLine("DualShock 4 controller connected.");
 
         // --- Start rumble feedback loop ---
-        var rumbleThread = new Thread(() => RumbleFeedbackLoop(_ds4)) { IsBackground = true };
-        rumbleThread.Start();
+        //var rumbleThread = new Thread(() => RumbleFeedbackLoop(_ds4)) { IsBackground = true };
+        //rumbleThread.Start();
 
         // --- Start reading loop ---
         var readThread = new Thread(ReadLoop) { IsBackground = true };
@@ -54,7 +54,7 @@ class Program
 
         _running = false;
         readThread.Join();
-        rumbleThread.Join();
+        //rumbleThread.Join();
         _serial.Close();
         _ds4.Disconnect();
     }
@@ -66,6 +66,7 @@ class Program
             try
             {
                 string line = _serial.ReadLine()?.Trim();
+                Console.WriteLine($"Received: {line}");
                 if (!string.IsNullOrEmpty(line))
                     ProcessFrame(line);
             }
@@ -79,33 +80,37 @@ class Program
         var parts = line.Split(',');
         if (parts.Length < 16) return; // Adjust if you have more fields
 
-        // Parse button states
-        bool A = parts[0] == "1";
-        bool B = parts[1] == "1";
-        bool X = parts[2] == "1";
-        bool Y = parts[3] == "1";
+        bool Cross = parts[0] == "1"; // X
+        bool Circle = parts[1] == "1"; // O
+        bool Square = parts[2] == "1"; // Firkant
+        bool Triangle = parts[3] == "1"; // Trekant
         bool DU = parts[4] == "1";
         bool DD = parts[5] == "1";
         bool DL = parts[6] == "1";
         bool DR = parts[7] == "1";
         bool leftThumb = parts[8] == "1";
         bool rightThumb = parts[9] == "1";
-        bool L1 = parts[10] == "1";
-        bool R1 = parts[11] == "1";
-        bool L2 = parts[12] == "1";
-        bool R2 = parts[13] == "1";
-        bool Start = parts[14] == "1";
-        bool GameButton = parts[15] == "1";
+        byte leftX = (byte)Math.Clamp((int)((float.Parse(parts[10]) / 4095f) * 255), 0, 255);
+        byte leftY = (byte)Math.Clamp((int)((float.Parse(parts[11]) / 4095f) * 255), 0, 255);
+        byte rightX = (byte)Math.Clamp((int)((float.Parse(parts[12]) / 4095f) * 255), 0, 255);
+        byte rightY = (byte)Math.Clamp((int)((float.Parse(parts[13]) / 4095f) * 255), 0, 255);
+        bool GameButton = parts[14] == "1";
+        bool Start = parts[15] == "1";
+        bool L1 = parts[16] == "1";
+        bool L2 = parts[17] == "1";
+        bool R1 = parts[18] == "1";
+        bool R2 = parts[19] == "1";
 
-        // --- Mode switching ---
+
+        //---Mode switching-- -
         if (GameButton)
         {
             // --- Controller mode ---
             // Set face buttons
-            _ds4.SetButtonState(DualShock4Button.Cross, A);
-            _ds4.SetButtonState(DualShock4Button.Circle, B);
-            _ds4.SetButtonState(DualShock4Button.Square, X);
-            _ds4.SetButtonState(DualShock4Button.Triangle, Y);
+            _ds4.SetButtonState(DualShock4Button.Cross, Cross);
+            _ds4.SetButtonState(DualShock4Button.Circle, Circle);
+            _ds4.SetButtonState(DualShock4Button.Square, Square);
+            _ds4.SetButtonState(DualShock4Button.Triangle, Triangle);
 
             // Set thumb buttons
             _ds4.SetButtonState(DualShock4Button.ThumbLeft, leftThumb);
@@ -145,67 +150,68 @@ class Program
                 dpadDirection = DualShock4DPadDirection.East;
 
             _ds4.SetDPadDirection(dpadDirection);
-
-            // --- Analog sticks ---
-            byte leftX = (byte)Math.Clamp((int)((float.Parse(parts[16]) / 4095f) * 255), 0, 255);
-            byte leftY = (byte)Math.Clamp((int)((float.Parse(parts[17]) / 4095f) * 255), 0, 255);
-            byte rightX = (byte)Math.Clamp((int)((float.Parse(parts[18]) / 4095f) * 255), 0, 255);
-            byte rightY = (byte)Math.Clamp((int)((float.Parse(parts[19]) / 4095f) * 255), 0, 255);
-
             _ds4.SetAxisValue(DualShock4Axis.LeftThumbX, leftX);
             _ds4.SetAxisValue(DualShock4Axis.LeftThumbY, leftY);
             _ds4.SetAxisValue(DualShock4Axis.RightThumbX, rightX);
             _ds4.SetAxisValue(DualShock4Axis.RightThumbY, rightY);
         }
+
+
+        // Calibration offsets (based on your reading)
+
+
         else
         {
-            // --- Mouse mode ---
-            // Only allow mouse movement and left/right click
+            const int centerX = 2255;
+            const int centerY = 1800;
+            const int deadZone = 250;
 
-            // Example: Use right stick for mouse movement
-            int mouseMoveX = (int)((float.Parse(parts[18]) - 2048) / 50); // Adjust divisor for sensitivity
-            int mouseMoveY = (int)((float.Parse(parts[19]) - 2048) / 50);
 
-            _inputSimulator.Mouse.MoveMouseBy(mouseMoveX, mouseMoveY);
+            double sensitivity = 0.01;
+            int rawX = int.Parse(parts[10]);
+            int rawY = int.Parse(parts[11]);
 
-            // Example: Use leftThumb for left click, rightThumb for right click
-            if (leftThumb && !prevBtnState)
-                _inputSimulator.Mouse.LeftButtonDown();
-            else if (!leftThumb && prevBtnState)
-                _inputSimulator.Mouse.LeftButtonUp();
+            int deltaX = rawX - centerX;
+            int deltaY = rawY - centerY;
 
-            if (rightThumb)
-                _inputSimulator.Mouse.RightButtonDown();
-            else
-                _inputSimulator.Mouse.RightButtonUp();
-
-            prevBtnState = leftThumb;
-        }
-    }
-    static void RumbleFeedbackLoop(IDualShock4Controller ds4)
-    {
-        while (_running)
-        {
-            try
+            if (Math.Abs(deltaX) > deadZone || Math.Abs(deltaY) > deadZone)
             {
-                bool timedOut;
-                var report = ds4.AwaitRawOutputReport(100, out timedOut).ToArray();
-                if (timedOut)
-                    continue;
+                int moveX = (int)(deltaX * sensitivity);
+                int moveY = (int)(deltaY * sensitivity);
 
-                // DS4 output report: [2]=smallRumble, [3]=largeRumble
-                byte smallRumble = report[2];
-                byte largeRumble = report[3];
-                int intensity = Math.Max(smallRumble, largeRumble);
-                intensity = Math.Clamp(intensity, 0, 127);
-
-                _serial.WriteLine($"Rumble,{intensity}");
-                Console.WriteLine($"Sent rumble intensity: {intensity} (small={smallRumble}, large={largeRumble})");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to send rumble: {ex.GetType().Name}: {ex.Message}");
+                _inputSimulator.Mouse.MoveMouseBy(moveX, moveY);
             }
         }
     }
+
+
 }
+
+
+//    static void RumbleFeedbackLoop(IDualShock4Controller ds4)
+//    {
+//        while (_running)
+//        {
+//            try
+//            {
+//                bool timedOut;
+//                var report = ds4.AwaitRawOutputReport(100, out timedOut).ToArray();
+//                if (timedOut)
+//                    continue;
+
+//                // DS4 output report: [2]=smallRumble, [3]=largeRumble
+//                byte smallRumble = report[2];
+//                byte largeRumble = report[3];
+//                int intensity = Math.Max(smallRumble, largeRumble);
+//                intensity = Math.Clamp(intensity, 0, 127);
+
+//                _serial.WriteLine($"Rumble,{intensity}");
+//                Console.WriteLine($"Sent rumble intensity: {intensity} (small={smallRumble}, large={largeRumble})");
+//            }
+//            catch (Exception ex)
+//            {
+//                Console.WriteLine($"Failed to send rumble: {ex.GetType().Name}: {ex.Message}");
+//            }
+//        }
+//    }
+//}
