@@ -1,27 +1,23 @@
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
-using Nefarius.ViGEm.Client.Targets.Xbox360;
+using Nefarius.ViGEm.Client.Targets.DualShock4;
 using System;
 using System.IO.Ports;
 using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Concurrent;
+using WindowsInput;
 
 class Program
 {
     static SerialPort _serial;
     static ViGEmClient _client;
-    static IXbox360Controller _xbox;
+    static IDualShock4Controller _ds4; // Use DS4 controller instead of Xbox360
     static volatile bool _running = true;
-
-    static BlockingCollection<string> _sendQueue = new BlockingCollection<string>();
-
-    const string ComPort = "COM13"; 
+    static string ComPort = "";  // <-- change to your COM port
     const int Baud = 115200;
-
-    static async Task Main()
+    static InputSimulator _inputSimulator = new InputSimulator();
+    static bool prevBtnState = false; // Track previous button state
+    static void Main()
     {
-        // --- 1. Initialize serial port ---
         _serial = new SerialPort(ComPort, Baud)
         {
             NewLine = "\n",
@@ -31,6 +27,7 @@ class Program
         try
         {
             _serial.Open();
+            Console.WriteLine($"Serial port {_serial.PortName} opened.");
         }
         catch (Exception ex)
         {
@@ -38,31 +35,30 @@ class Program
             return;
         }
 
-        // --- 2. Initialize ViGEm controller ---
+        // --- Initialize ViGEm DS4 controller ---
         _client = new ViGEmClient();
-        _xbox = _client.CreateXbox360Controller();
-        _xbox.FeedbackReceived += Xbox_FeedbackReceived;
-        _xbox.Connect();
+        _ds4 = _client.CreateDualShock4Controller();
+        _ds4.Connect();
+        Console.WriteLine("DualShock 4 controller connected.");
 
-        // --- 3. Start async read & write loops ---
-        var readTask = Task.Run(() => ReadLoop());
-        var writeTask = Task.Run(() => WriteLoop());
+        // --- Start rumble feedback loop ---
+        var rumbleThread = new Thread(() => RumbleFeedbackLoop(_ds4)) { IsBackground = true };
+        rumbleThread.Start();
+
+        // --- Start reading loop ---
+        var readThread = new Thread(ReadLoop) { IsBackground = true };
+        readThread.Start();
 
         Console.WriteLine("Controller running. Press Enter to quit.");
         Console.ReadLine();
 
-        // --- 4. Stop tasks ---
         _running = false;
-        _sendQueue.CompleteAdding();
-
-        await Task.WhenAll(readTask, writeTask);
-
-        // --- 5. Cleanup ---
+        readThread.Join();
+        rumbleThread.Join();
         _serial.Close();
-        _xbox.Disconnect();
+        _ds4.Disconnect();
     }
 
-    // --- Asynchronous reading ---
     static void ReadLoop()
     {
         while (_running)
@@ -71,72 +67,145 @@ class Program
             {
                 string line = _serial.ReadLine()?.Trim();
                 if (!string.IsNullOrEmpty(line))
-                {
                     ProcessFrame(line);
-                }
             }
-            catch (TimeoutException) { } // expected
+            catch (TimeoutException) { }
             catch (Exception ex) { Console.WriteLine($"Serial read error: {ex.Message}"); }
-        }
-    }
-
-    // --- Asynchronous writing ---
-    static void WriteLoop()
-    {
-        foreach (var msg in _sendQueue.GetConsumingEnumerable())
-        {
-            try
-            {
-                if (_serial.IsOpen)
-                    _serial.WriteLine(msg);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Serial write error: {ex.Message}");
-            }
         }
     }
 
     static void ProcessFrame(string line)
     {
         var parts = line.Split(',');
-        if (parts.Length < 14) return;
+        if (parts.Length < 16) return; // Adjust if you have more fields
 
-        // Map buttons
-        _xbox.SetButtonState(Xbox360Button.A, parts[0] == "1");
-        _xbox.SetButtonState(Xbox360Button.B, parts[1] == "1");
-        _xbox.SetButtonState(Xbox360Button.X, parts[2] == "1");
-        _xbox.SetButtonState(Xbox360Button.Y, parts[3] == "1");
-        _xbox.SetButtonState(Xbox360Button.Up, parts[4] == "1");
-        _xbox.SetButtonState(Xbox360Button.Down, parts[5] == "1");
-        _xbox.SetButtonState(Xbox360Button.Left, parts[6] == "1");
-        _xbox.SetButtonState(Xbox360Button.Right, parts[7] == "1");
-        _xbox.SetButtonState(Xbox360Button.LeftThumb, parts[8] == "1");
-        _xbox.SetButtonState(Xbox360Button.RightThumb, parts[9] == "1");
+        // Parse button states
+        bool A = parts[0] == "1";
+        bool B = parts[1] == "1";
+        bool X = parts[2] == "1";
+        bool Y = parts[3] == "1";
+        bool DU = parts[4] == "1";
+        bool DD = parts[5] == "1";
+        bool DL = parts[6] == "1";
+        bool DR = parts[7] == "1";
+        bool leftThumb = parts[8] == "1";
+        bool rightThumb = parts[9] == "1";
+        bool L1 = parts[10] == "1";
+        bool R1 = parts[11] == "1";
+        bool L2 = parts[12] == "1";
+        bool R2 = parts[13] == "1";
+        bool Start = parts[14] == "1";
+        bool GameButton = parts[15] == "1";
 
-        // Analog sticks
-        int stickX = (int)((float.Parse(parts[10]) / 4095.0f) * 65535 - 32768);
-        int stickY = (int)((float.Parse(parts[11]) / 4095.0f) * -65535 + 32768);
-        int stickX2 = (int)((float.Parse(parts[12]) / 4095.0f) * 65535 - 32768);
-        int stickY2 = (int)((float.Parse(parts[13]) / 4095.0f) * -65535 + 32768);
+        // --- Mode switching ---
+        if (GameButton)
+        {
+            // --- Controller mode ---
+            // Set face buttons
+            _ds4.SetButtonState(DualShock4Button.Cross, A);
+            _ds4.SetButtonState(DualShock4Button.Circle, B);
+            _ds4.SetButtonState(DualShock4Button.Square, X);
+            _ds4.SetButtonState(DualShock4Button.Triangle, Y);
 
-        stickX = Math.Clamp(stickX, -32768, 32767);
-        stickY = Math.Clamp(stickY, -32768, 32767);
-        stickX2 = Math.Clamp(stickX2, -32768, 32767);
-        stickY2 = Math.Clamp(stickY2, -32768, 32767);
+            // Set thumb buttons
+            _ds4.SetButtonState(DualShock4Button.ThumbLeft, leftThumb);
+            _ds4.SetButtonState(DualShock4Button.ThumbRight, rightThumb);
 
-        _xbox.SetAxisValue(Xbox360Axis.LeftThumbX, (short)stickX);
-        _xbox.SetAxisValue(Xbox360Axis.LeftThumbY, (short)stickY);
-        _xbox.SetAxisValue(Xbox360Axis.RightThumbX, (short)stickX2);
-        _xbox.SetAxisValue(Xbox360Axis.RightThumbY, (short)stickY2);
+            // Set shoulder and trigger buttons
+            _ds4.SetButtonState(DualShock4Button.ShoulderLeft, L1);
+            _ds4.SetButtonState(DualShock4Button.ShoulderRight, R1);
+            _ds4.SetButtonState(DualShock4Button.TriggerLeft, L2);
+            _ds4.SetButtonState(DualShock4Button.TriggerRight, R2);
+
+            _ds4.SetButtonState(DualShock4Button.Options, Start);
+
+            // D-pad direction for DS4
+            DualShock4DPadDirection dpadDirection = DualShock4DPadDirection.None;
+            if (DU)
+            {
+                if (DL)
+                    dpadDirection = DualShock4DPadDirection.Northwest;
+                else if (DR)
+                    dpadDirection = DualShock4DPadDirection.Northeast;
+                else
+                    dpadDirection = DualShock4DPadDirection.North;
+            }
+            else if (DD)
+            {
+                if (DL)
+                    dpadDirection = DualShock4DPadDirection.Southwest;
+                else if (DR)
+                    dpadDirection = DualShock4DPadDirection.Southeast;
+                else
+                    dpadDirection = DualShock4DPadDirection.South;
+            }
+            else if (DL)
+                dpadDirection = DualShock4DPadDirection.West;
+            else if (DR)
+                dpadDirection = DualShock4DPadDirection.East;
+
+            _ds4.SetDPadDirection(dpadDirection);
+
+            // --- Analog sticks ---
+            byte leftX = (byte)Math.Clamp((int)((float.Parse(parts[16]) / 4095f) * 255), 0, 255);
+            byte leftY = (byte)Math.Clamp((int)((float.Parse(parts[17]) / 4095f) * 255), 0, 255);
+            byte rightX = (byte)Math.Clamp((int)((float.Parse(parts[18]) / 4095f) * 255), 0, 255);
+            byte rightY = (byte)Math.Clamp((int)((float.Parse(parts[19]) / 4095f) * 255), 0, 255);
+
+            _ds4.SetAxisValue(DualShock4Axis.LeftThumbX, leftX);
+            _ds4.SetAxisValue(DualShock4Axis.LeftThumbY, leftY);
+            _ds4.SetAxisValue(DualShock4Axis.RightThumbX, rightX);
+            _ds4.SetAxisValue(DualShock4Axis.RightThumbY, rightY);
+        }
+        else
+        {
+            // --- Mouse mode ---
+            // Only allow mouse movement and left/right click
+
+            // Example: Use right stick for mouse movement
+            int mouseMoveX = (int)((float.Parse(parts[18]) - 2048) / 50); // Adjust divisor for sensitivity
+            int mouseMoveY = (int)((float.Parse(parts[19]) - 2048) / 50);
+
+            _inputSimulator.Mouse.MoveMouseBy(mouseMoveX, mouseMoveY);
+
+            // Example: Use leftThumb for left click, rightThumb for right click
+            if (leftThumb && !prevBtnState)
+                _inputSimulator.Mouse.LeftButtonDown();
+            else if (!leftThumb && prevBtnState)
+                _inputSimulator.Mouse.LeftButtonUp();
+
+            if (rightThumb)
+                _inputSimulator.Mouse.RightButtonDown();
+            else
+                _inputSimulator.Mouse.RightButtonUp();
+
+            prevBtnState = leftThumb;
+        }
     }
-
-    private static void Xbox_FeedbackReceived(object sender, Xbox360FeedbackReceivedEventArgs e)
+    static void RumbleFeedbackLoop(IDualShock4Controller ds4)
     {
-        int intensity = Math.Max(e.LargeMotor, e.SmallMotor);
-        intensity = Math.Clamp(intensity / 2, 0, 127);
-        Console.WriteLine($"Rumble intensity: {intensity}");
-        // Queue the rumble message instead of writing directly
-        _sendQueue.Add($"Rumble,{intensity}");
+        while (_running)
+        {
+            try
+            {
+                bool timedOut;
+                var report = ds4.AwaitRawOutputReport(100, out timedOut).ToArray();
+                if (timedOut)
+                    continue;
+
+                // DS4 output report: [2]=smallRumble, [3]=largeRumble
+                byte smallRumble = report[2];
+                byte largeRumble = report[3];
+                int intensity = Math.Max(smallRumble, largeRumble);
+                intensity = Math.Clamp(intensity, 0, 127);
+
+                _serial.WriteLine($"Rumble,{intensity}");
+                Console.WriteLine($"Sent rumble intensity: {intensity} (small={smallRumble}, large={largeRumble})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send rumble: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
     }
 }

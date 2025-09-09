@@ -41,13 +41,12 @@ void setup()
     pinMode(joyStickBtnLeft, INPUT_PULLUP);
     pinMode(joyStickBtnRight, INPUT_PULLUP);
     Wire.begin();
-    if (!hapDrive.begin())
-        Serial.println("Could not communicate with Haptic Driver.");
+    hapDrive.begin();
     hapDrive.defaultMotor();
     hapDrive.enableFreqTrack(false);
     hapDrive.setOperationMode(DRO_MODE);
     Serial.println("DA7280 ready.");
-    hapDrive.setVibrate(0);
+    hapDrive.setVibrate(10);
 }
 
 void loop()
