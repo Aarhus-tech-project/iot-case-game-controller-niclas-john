@@ -17,7 +17,8 @@ Quick Start Guide
    Use the OUTGOING port (e.g., COM12).
 
 3. Start the GameController Driver
-   Go to the Driver folder and run the Gamecontroller shortcut file. Or else just open the project on visual studio and run it there.
+   Go to the Driver folder and run the Gamecontroller shortcut file. (• Requires .NET 8 runtime installed on the target machine.)
+   Else just open the project on visual studio and run it there.
    When prompted, enter the COM port number (e.g., 12 for COM12).
 4. MQTT Connection (Optional)
    If you are connected to the h4prog WiFi network, the controller will connect to MQTT automatically.
