@@ -7,7 +7,7 @@ Quick Start Guide
    https://vigembusdriver.com
 
 2. Connect the Controller via Bluetooth
-   Pair your controller with your PC via Bluetooth.
+   Pair your controller with your PC via Bluetooth. Look for name : Game_Controller
    Open Bluetooth settings and scroll down to More Bluetooth Settings.
    At the top, you’ll see the COM ports for connected devices.
    Find the device name you just paired and note the OUTGOING COM port.
