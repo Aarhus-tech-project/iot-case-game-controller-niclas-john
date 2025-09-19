@@ -20,24 +20,27 @@ def init_db():
         CREATE TABLE IF NOT EXISTS controller_data (
             id BIGSERIAL PRIMARY KEY,
             topic TEXT,
-            X TEXT,
-            O TEXT,
-            Firkant TEXT,
-            Trekant TEXT,
-            DU TEXT,
-            DD TEXT,
-            DL TEXT,
-            DR TEXT,
-            joyStickBtnLeft TEXT,
-            joyStickBtnRight TEXT,
-            rotRX TEXT,
-            rotRY TEXT,
-            gameBtn TEXT,
-            startBtn TEXT,
-            left_l1 TEXT,
-            left_l2 TEXT,
-            right_r1 TEXT,
-            right_r2 TEXT,
+            "A" BOOL,
+            "B" BOOL,
+            "X" BOOL,
+            "Y" BOOL,
+            "DU" BOOL,
+            "DD" BOOL,
+            "DL" BOOL,
+            "DR" BOOL,
+            "JoyLBtnState" BOOL,
+            "JoyRBtnState" BOOL,
+            "JoyLX" INT,
+            "JoyLY" INT,
+            "JoyRX" INT,
+            "JoyRY" INT,
+            "GameButton" BOOL,
+            "Start" BOOL,
+            "L1" BOOL,
+            "L2" BOOL,
+            "R1" BOOL,
+            "R2" BOOL,
+            "rumble" INT,
             timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -49,14 +52,30 @@ def insert_controller_data(topic, payload):
     conn = psycopg2.connect(**DB_CONFIG)
     cursor = conn.cursor()
     fields = [
-        "X", "O", "Firkant", "Trekant", "DU", "DD", "DL", "DR",
-        "joyStickBtnLeft", "joyStickBtnRight",
-        "rotRX", "rotRY",
-        "gameBtn", "startBtn", "left_l1", "left_l2", "right_r1", "right_r2"
-    ]
-    values = [payload.get(f) for f in fields]
+    "A", "B", "X", "Y", "DU", "DD", "DL", "DR",
+    "JoyLBtnState", "JoyRBtnState",
+    "JoyLX", "JoyLY", "JoyRX", "JoyRY",
+    "GameButton", "Start", "L1", "L2", "R1", "R2", "rumble"
+]
+    int_fields = {"JoyLX", "JoyLY", "JoyRX", "JoyRY", "rumble"}
+    bool_fields = {"A", "B", "X", "Y", "DU", "DD", "DL", "DR", "JoyLBtnState", "JoyRBtnState", "GameButton", "Start", "L1", "L2", "R1", "R2"}
+    values = []
+    for f in fields:
+        if f in int_fields:
+            try:
+                values.append(int(payload.get(f, 0)))
+            except (ValueError, TypeError):
+                values.append(0)
+        elif f in bool_fields:
+            v = payload.get(f, False)
+            if isinstance(v, str):
+                v = v.lower() in ("true", "1", "yes", "on")
+            values.append(bool(v))
+        else:
+            values.append(None)
+    quoted_fields = [f'"{f}"' for f in fields]
     cursor.execute(
-        f"INSERT INTO controller_data (topic, {', '.join(fields)}) VALUES (%s, {', '.join(['%s']*len(fields))})",
+        f"INSERT INTO controller_data (topic, {', '.join(quoted_fields)}) VALUES (%s, {', '.join(['%s']*len(fields))})",
         [topic] + values
     )
     conn.commit()

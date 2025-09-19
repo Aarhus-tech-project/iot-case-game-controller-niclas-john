@@ -1,22 +1,24 @@
 #include "BluetoothSerial.h"
 #include <Wire.h>
-#include "test_db.h"
+#include <math.h>
 
 BluetoothSerial SerialBT;
 
-// Gamepad pins (ESP32 GPIOs)
+// Gamepad pins
 const int PIN_X = 15, PIN_O = 2, PIN_Firkant = 4, PIN_Trekant = 0;
 const int PIN_DU = 5, PIN_DD = 16, PIN_DL = 18, PIN_DR = 17;
 const int joyStickBtnLeft = 19;
 const int joyStickBtnRight = 23;
 
-// Joystick analog pins (ESP32 GPIOs)
+// Joystick analog pins
 const int JOY_X = 36, JOY_Y = 39;
 const int JOY_X2 = 34, JOY_Y2 = 35;
 
 const int gameBtn = 27, startBtn = 14;
 const int left_l1 = 32, left_l2 = 33;
 const int right_r1 = 25, right_r2 = 26;
+
+const int rumblePin = 12;
 
 int readButton(int pin) { return digitalRead(pin) == LOW ? 1 : 0; }
 
@@ -33,8 +35,7 @@ void rotateJoystick(int rawX, int rawY, float angle, int &outX, int &outY)
 void setup()
 {
     Serial.begin(115200);
-
-        Wire.begin(21, 22);
+    Wire.begin(21, 22);
 
     // Configure ESP32 buttons
     pinMode(PIN_X, INPUT_PULLUP);
@@ -54,22 +55,14 @@ void setup()
     pinMode(right_r1, INPUT_PULLUP);
     pinMode(right_r2, INPUT_PULLUP);
 
-    SerialBT.begin("Nillers"); // Bluetooth Serial
+    SerialBT.begin("Game_Controller");
 
-    // Setup WiFi and MQTT (from test_db.h)
-    setup_wifi();
-    client.setServer(mqtt_server, mqtt_port);
+    pinMode(rumblePin, OUTPUT);
+    digitalWrite(rumblePin, LOW);
 }
-
+String btBuffer = "";
 void loop()
 {
-    // Ensure MQTT connection
-    if (!client.connected())
-    {
-        reconnect_mqtt();
-    }
-    client.loop();
-
     // --- Read joysticks ---
     int lx = analogRead(JOY_X);
     int ly = analogRead(JOY_Y);
@@ -94,11 +87,27 @@ void loop()
         String(readButton(right_r1)) + "," + String(readButton(right_r2));
 
     SerialBT.println(data);
-    Serial.println(data);
+    // --- Read rumble from PC ---
+    while (SerialBT.available())
+    {
+        char c = (char)SerialBT.read();
+        if (c == '\r')
+            continue;
+        if (c == '\n')
+        {
+            btBuffer.trim();
+            if (btBuffer.startsWith("Rumble,"))
+            {
+                int val = btBuffer.substring(7).toInt();
+                digitalWrite(rumblePin, val > 0 ? HIGH : LOW);
+            }
+            btBuffer = "";
+        }
+        else
+        {
+            btBuffer += c;
+        }
+    }
 
-    // Convert CSV to JSON and send to MQTT
-    String json = csvToJson(data);
-    client.publish("controller/data", json.c_str());
-
-    delay(20);
+    delay(15);
 }
