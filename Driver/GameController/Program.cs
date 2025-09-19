@@ -32,6 +32,7 @@ class Program
         Console.WriteLine("Virtual Xbox 360 controller connected.");
 
         // Initialize MQTT
+        Console.WriteLine("Trying to connect to MQTT broker... If it fails, the project will continue");
         _mqtt = new MqttHelper("192.168.113.12", 1883, "postgres", "Datait2025!");
 
         _serial = new SerialPort(ComPort, Baud)
